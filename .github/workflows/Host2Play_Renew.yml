@@ -41,17 +41,25 @@ jobs:
         run: |
           # Download Xray-core
           curl -sL https://github.com/XTLS/Xray-core/releases/latest/download/Xray-linux-64.zip -o xray.zip
-          unzip -q xray.zip && chmod +x xray
+          mkdir -p xray-bin && unzip -qo xray.zip -d xray-bin && chmod +x xray-bin/xray
 
           # Write V2Ray config from secrets
           echo "$V2RAY_CONFIG" > config.json
 
-          # Validate config
-          ./xray test -c config.json || { echo "❌ Xray 配置验证失败"; exit 1; }
+          # Verify Xray binary works
+          ./xray-bin/xray version
 
-          # Start Xray in background
-          ./xray run -c config.json &
+          # Start Xray in background and validate config by checking startup
+          ./xray-bin/xray run -c config.json &
+          XRAY_PID=$!
           sleep 5
+
+          # Check if Xray is still running (crashed = bad config)
+          if ! kill -0 $XRAY_PID 2>/dev/null; then
+            echo "❌ Xray 启动失败，请检查 V2RAY_CONFIG 配置是否正确"
+            exit 1
+          fi
+          echo "✅ Xray 代理启动成功 (PID: $XRAY_PID)"
 
           # Verify proxy is working
           echo "直连 IP：$(curl -s --max-time 5 ifconfig.me || echo '失败')"
@@ -73,7 +81,7 @@ jobs:
       - name: 停止 Xray 代理
         if: always()
         run: |
-          pkill -f "./xray" || true
+          pkill -f "xray-bin/xray" || true
           echo "Xray 代理已停止"
 
       - name: 上传截图
@@ -100,8 +108,11 @@ jobs:
 # 1. Fork 本仓库
 # 2. 在 Settings → Secrets → Actions 中添加：
 #    - V2RAY_CONFIG: Xray 代理配置 JSON（完整字符串）
+#      ⚠️ 注意：V2RAY_CONFIG 必须是完整的 JSON，包含 inbounds 和 outbounds
+#      ⚠️ 确保 inbounds 中有 SOCKS 协议监听，端口与 PROXY_PORT 一致（默认 10808）
 #    - TG_BOT_TOKEN: Telegram Bot Token（可选）
 #    - TG_CHAT_ID: Telegram Chat ID（可选）
 # 3. 修改 main.py 中的 RENEW_URLS 为你的服务器续期链接
 # 4. 启用 Actions
+# 5. 手动触发一次测试运行，确认 Xray 代理启动成功
 # ========================================
