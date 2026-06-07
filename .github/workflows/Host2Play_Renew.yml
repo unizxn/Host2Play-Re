@@ -1,9 +1,9 @@
-name: Host2Play 续期
+name: Host2Play 续期（Xray 代理版）
 
 on:
   schedule:
-    - cron: '0 0,11,22 * * *'    # 触发点: 00:00, 11:00, 22:00
-    - cron: '30 5,16 * * *'      # 触发点: 05:30, 16:30
+    - cron: '0 0,11,22 * * *'    # UTC 00:00, 11:00, 22:00
+    - cron: '30 5,16 * * *'      # UTC 05:30, 16:30
   workflow_dispatch:
 
 permissions:
@@ -12,9 +12,8 @@ permissions:
 
 jobs:
   run-renew:
-    name: 执行脚本
+    name: 执行续期
     runs-on: ubuntu-latest
-
     steps:
       - name: 拉取仓库
         uses: actions/checkout@v4
@@ -36,37 +35,46 @@ jobs:
           python -m pip install --upgrade pip
           pip install DrissionPage xvfbwrapper requests SpeechRecognition pydub
 
-      - name: 启用 WARP 网络
-        uses: fscarmen/warp-on-actions@v1.3
-        with:
-          stack: dual
-          mode: client
-
-      - name: 修复 DNS
+      - name: 下载并启动 Xray 代理
+        env:
+          V2RAY_CONFIG: ${{ secrets.V2RAY_CONFIG }}
         run: |
-          echo "[INFO] 停用 systemd-resolved，设置公共 DNS..."
-          sudo systemctl stop systemd-resolved 2>/dev/null || true
-          sudo systemctl disable systemd-resolved 2>/dev/null || true
+          # Download Xray-core
+          curl -sL https://github.com/XTLS/Xray-core/releases/latest/download/Xray-linux-64.zip -o xray.zip
+          unzip -q xray.zip && chmod +x xray
 
-          sudo rm -f /etc/resolv.conf
-          echo -e "nameserver 1.1.1.1\nnameserver 8.8.8.8\nnameserver 1.0.0.1" | sudo tee /etc/resolv.conf
+          # Write V2Ray config from secrets
+          echo "$V2RAY_CONFIG" > config.json
 
-          sleep 2
+          # Validate config
+          ./xray test -c config.json || { echo "❌ Xray 配置验证失败"; exit 1; }
 
-          echo "[INFO] DNS 测试:"
-          nslookup host2play.gratis 1.1.1.1 || echo "[WARN] 解析失败"
+          # Start Xray in background
+          ./xray run -c config.json &
+          sleep 5
 
-          echo ""
-          echo "[INFO] 当前出口 IP:"
-          curl -s --max-time 10 https://api.ipify.org && echo
-          echo "[INFO] WARP Trace:"
-          curl -s --max-time 10 https://www.cloudflare.com/cdn-cgi/trace | grep -E 'ip=|warp=|loc=' || true
+          # Verify proxy is working
+          echo "直连 IP：$(curl -s --max-time 5 ifconfig.me || echo '失败')"
+          echo "代理 IP：$(curl -s --max-time 10 --socks5 127.0.0.1:10808 ifconfig.me || echo '代理失败，请检查 V2RAY_CONFIG')"
+
+          if ! curl -s --max-time 10 --socks5 127.0.0.1:10808 https://www.google.com > /dev/null 2>&1; then
+            echo "⚠️ Xray 代理连接 Google 失败，但继续执行脚本"
+          fi
 
       - name: 执行续订
         env:
           TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
           TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
+          PROXY_PORT: "10808"
+          MAX_CAPTCHA: "5"
+          MAX_RENEW_RETRIES: "3"
         run: python main.py
+
+      - name: 停止 Xray 代理
+        if: always()
+        run: |
+          pkill -f "./xray" || true
+          echo "Xray 代理已停止"
 
       - name: 上传截图
         if: always()
@@ -86,3 +94,14 @@ jobs:
           delete_workflow_pattern: ${{ github.workflow }}
           retain_days: 0
           keep_minimum_runs: 2
+
+# ========================================
+# 部署说明：
+# 1. Fork 本仓库
+# 2. 在 Settings → Secrets → Actions 中添加：
+#    - V2RAY_CONFIG: Xray 代理配置 JSON（完整字符串）
+#    - TG_BOT_TOKEN: Telegram Bot Token（可选）
+#    - TG_CHAT_ID: Telegram Chat ID（可选）
+# 3. 修改 main.py 中的 RENEW_URLS 为你的服务器续期链接
+# 4. 启用 Actions
+# ========================================
