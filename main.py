@@ -40,8 +40,8 @@ SOCKS5_PROXY = f"socks5://{{PROXY_HOST}}:{{PROXY_PORT}}"
 
 # 续期链接列表
 RENEW_URLS = [
-    "https://host2play.gratis/server/renew?i=test-12345",
-    "https://host2play.gratis/server/renew?i=test-server-123",
+    # 添加你的续期链接
+    # "https://host2play.gratis/server/renew?i=your-server-id",
 ]
 
 # 重试配置
