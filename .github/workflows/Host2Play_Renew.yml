@@ -3,7 +3,7 @@ name: Host2Play 续期
 on:
   schedule:
     - cron: '0 0,11,22 * * *'    # 触发点: 00:00, 11:00, 22:00
-    - cron: '30 5,16 * * *'      # 触发点: 05:30, 16:30
+    - cron: '30 5,16 * * *'       # 触发点: 05:30, 16:30
   workflow_dispatch:
 
 permissions:
@@ -36,32 +36,27 @@ jobs:
           python -m pip install --upgrade pip
           pip install DrissionPage xvfbwrapper requests SpeechRecognition pydub
 
-      # ==========================================
-      # 关键变更：用 Xray 替代 WARP
-      # 不再使用 fscarmen/warp-on-actions
-      # 改为下载 Xray 并使用 V2RAY_CONFIG 代理
-      # ==========================================
+      # ====== 新增：下载并启动 Xray 代理（替代 WARP） ======
       - name: 下载并启动 Xray 代理
         env:
           V2RAY_CONFIG: ${{ secrets.V2RAY_CONFIG }}
         run: |
-          # 下载 Xray
+          echo "📥 下载 Xray..."
           curl -sL https://github.com/XTLS/Xray-core/releases/latest/download/Xray-linux-64.zip -o xray.zip
           unzip -q xray.zip && chmod +x xray
 
-          # 写入配置文件
+          echo "📝 写入 Xray 配置..."
           echo "$V2RAY_CONFIG" > config.json
 
-          # 启动 Xray
+          echo "🚀 启动 Xray（后台运行）..."
           ./xray run -c config.json &
+          XRAY_PID=$!
+          echo "XRAY_PID=$XRAY_PID" >> $GITHUB_ENV
           sleep 5
 
-          # 验证代理是否正常
-          echo "直连 IP：$(curl -s --max-time 5 ifconfig.me || echo '失败')"
-          echo "代理 IP：$(curl -s --max-time 10 --socks5 127.0.0.1:10808 ifconfig.me || echo '代理失败，请检查 V2RAY_CONFIG')"
-
-      # 注意：不再需要"修复 DNS"步骤
-      # Xray 代理在应用层工作，不需要修改系统 DNS
+          echo "🌐 网络检测："
+          echo "  直连 IP：$(curl -s --max-time 5 ifconfig.me || echo '获取失败')"
+          echo "  代理 IP：$(curl -s --max-time 10 --socks5 127.0.0.1:10808 ifconfig.me || echo '代理失败，请检查 V2RAY_CONFIG')"
 
       - name: 执行续订
         env:
