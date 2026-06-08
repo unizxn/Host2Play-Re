@@ -2,8 +2,8 @@ name: Host2Play 续期
 
 on:
   schedule:
-    - cron: '0 0,11,22 * * *'    # 触发点: 00:00, 11:00, 22:00
-    - cron: '30 5,16 * * *'       # 触发点: 05:30, 16:30
+    - cron: '0 0,11,22 * * *'
+    - cron: '30 5,16 * * *'
   workflow_dispatch:
 
 permissions:
@@ -36,14 +36,13 @@ jobs:
           python -m pip install --upgrade pip
           pip install DrissionPage xvfbwrapper requests SpeechRecognition pydub
 
-      # ====== 新增：下载并启动 Xray 代理（替代 WARP） ======
       - name: 下载并启动 Xray 代理
         env:
           V2RAY_CONFIG: ${{ secrets.V2RAY_CONFIG }}
         run: |
           echo "📥 下载 Xray..."
           curl -sL https://github.com/XTLS/Xray-core/releases/latest/download/Xray-linux-64.zip -o xray.zip
-          unzip -q xray.zip && chmod +x xray
+          unzip -o -q xray.zip && chmod +x xray
 
           echo "📝 写入 Xray 配置..."
           echo "$V2RAY_CONFIG" > config.json
@@ -62,6 +61,7 @@ jobs:
         env:
           TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
           TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
+          RENEW_URLS: ${{ secrets.RENEW_URLS }}   # <--- 关键修复：传递给 Python
         run: python main.py
 
       - name: 上传截图
