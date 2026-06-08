@@ -48,14 +48,14 @@ jobs:
           # 下载 Xray
           curl -sL https://github.com/XTLS/Xray-core/releases/latest/download/Xray-linux-64.zip -o xray.zip
           unzip -q xray.zip && chmod +x xray
-          
+
           # 写入配置文件
           echo "$V2RAY_CONFIG" > config.json
-          
+
           # 启动 Xray
           ./xray run -c config.json &
           sleep 5
-          
+
           # 验证代理是否正常
           echo "直连 IP：$(curl -s --max-time 5 ifconfig.me || echo '失败')"
           echo "代理 IP：$(curl -s --max-time 10 --socks5 127.0.0.1:10808 ifconfig.me || echo '代理失败，请检查 V2RAY_CONFIG')"
