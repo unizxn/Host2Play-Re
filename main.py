@@ -3,7 +3,7 @@
 """
 Host2Play 自动续期脚本
 使用 Xray SOCKS5 代理访问，已移除 WARP 逻辑
-包含 URL 隐私保护，防止敏感参数泄露到日志和 Telegram 通知中
+包含 URL 隐私保护，TG 通知端优化为短格式避免编码暴长
 """
 
 import os
@@ -43,32 +43,35 @@ OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 # 工具函数
 # ==============================================================================
 
-def mask_url(url):
+def mask_url(url, for_tg=False):
     """
-    隐私处理 URL，隐藏敏感参数值，只保留域名、路径和参数名。
-    例如：?i=ae2b2db1-xxxx-xxxx-xxxx-xxxxxxxxxx59 -> ?i=ae********************************59
+    URL 隐私处理
+    for_tg=True:  短格式 ?i=ae2b2db1-2... (防编码暴长，适合 TG)
+    for_tg=False: 长格式 ?i=ae********************************59 (详细打码，适合日志)
     """
     try:
         parsed = urlparse(url)
         params = parse_qs(parsed.query)
-        
+        if not params:
+            return url
+            
         masked_params = {}
         for key, value in params.items():
             if value:
                 val = value[0]
-                if len(val) > 8:
-                    # 保留前2位和后2位，中间用 * 替代
-                    masked_params[key] = [f"{val[:2]}{'*' * (len(val) - 4)}{val[-2:]}"]
+                if for_tg:
+                    # TG 端：保留前10位，用 ... 收尾，避免 * 被编码成 %2A 导致链接暴长
+                    masked_params[key] = [f"{val[:10]}..."]
                 else:
-                    masked_params[key] = ['*' * len(val)]
+                    # 日志端：保留首尾2位，中间用 * 替代
+                    masked_params[key] = [f"{val[:2]}{'*' * (len(val) - 4)}{val[-2:]}"]
             else:
                 masked_params[key] = ['']
-        
+                
         masked_query = urlencode(masked_params, doseq=True)
         return f"{parsed.scheme}://{parsed.netloc}{parsed.path}?{masked_query}"
     except Exception:
-        # 如果解析失败，返回完全脱敏的占位符
-        return "https://***.***.***/***?i=***"
+        return url[:40] + "..."
 
 
 def log(message, level="INFO"):
@@ -183,9 +186,8 @@ def solve_audio_captcha(page):
 
 def renew_single_url(url):
     """单个 URL 的续期流程"""
-    # ★★★ 关键：日志输出使用脱敏后的 URL ★★★
-    masked_url = mask_url(url)
-    log(f"开始处理: {masked_url}")
+    # 日志端使用详细打码
+    log(f"开始处理: {mask_url(url)}")
     failure_reason = "未知错误"
     
     try:
@@ -217,8 +219,8 @@ def renew_single_url(url):
                 co.headless(False)
                 page = ChromiumPage(co)
                 
-                # ★★★ 关键：日志输出使用脱敏后的 URL，但 page.get 必须使用原始真实的 url ★★★
-                log(f"正在访问: {masked_url}")
+                # 日志端使用详细打码，但 page.get 必须使用原始真实的 url
+                log(f"正在访问: {mask_url(url)}")
                 page.get(url)
                 time.sleep(3)
                 
@@ -327,7 +329,6 @@ def main():
             log(f"{'#'*60}")
             
             success, message = renew_single_url(url)
-            # 存入结果时保留原始 URL，但在打印时脱敏
             results.append({"url": url, "success": success, "message": message})
             
             if success:
@@ -341,8 +342,8 @@ def main():
         summary = f"续期完成\n成功: {success_count}/{len(results)}\n失败: {fail_count}/{len(results)}\n\n"
         for r in results:
             status = "✅" if r["success"] else "❌"
-            # ★★★ 关键：汇总报告和 TG 通知中的 URL 也必须脱敏 ★★★
-            summary += f"{status} {mask_url(r['url'])}\n   {r['message']}\n"
+            # ★★★ 关键修复：TG 通知端使用短格式 (for_tg=True)，避免 * 被编码成 %2A 导致链接暴长 ★★★
+            summary += f"{status} {mask_url(r['url'], for_tg=True)}\n   {r['message']}\n"
         
         log("\n" + "=" * 60)
         log(summary)
