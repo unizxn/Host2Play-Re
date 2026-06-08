@@ -53,15 +53,30 @@ jobs:
           echo "XRAY_PID=$XRAY_PID" >> $GITHUB_ENV
           sleep 5
 
-          echo "🌐 网络检测："
+          echo " 网络检测："
           echo "  直连 IP：$(curl -s --max-time 5 ifconfig.me || echo '获取失败')"
-          echo "  代理 IP：$(curl -s --max-time 10 --socks5 127.0.0.1:10808 ifconfig.me || echo '代理失败，请检查 V2RAY_CONFIG')"
+          
+          # 获取代理 IP 并进行隐私处理（只保留第2个数字和倒数第2个数字）
+          PROXY_IP=$(curl -s --max-time 10 --socks5 127.0.0.1:10808 ifconfig.me || echo '代理失败')
+          if [[ $PROXY_IP =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            # 将所有字符替换为星号
+            MASKED_IP=$(echo "$PROXY_IP" | sed "s/./\*/g")
+            # 提取第2个数字和倒数第2个数字
+            SECOND_DIGIT=${PROXY_IP:1:1}
+            SECOND_LAST_DIGIT=${PROXY_IP: -2:1}
+            # 恢复这两个数字的位置
+            LEN=${#MASKED_IP}
+            MASKED_IP="${MASKED_IP:0:1}${SECOND_DIGIT}${MASKED_IP:2:$LEN-3}${SECOND_LAST_DIGIT}${MASKED_IP:$LEN-1}"
+            echo "  代理 IP：$MASKED_IP"
+          else
+            echo "  代理 IP：获取失败，请检查 V2RAY_CONFIG"
+          fi
 
       - name: 执行续订
         env:
           TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
           TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
-          RENEW_URLS: ${{ secrets.RENEW_URLS }}   # <--- 关键修复：传递给 Python
+          RENEW_URLS: ${{ secrets.RENEW_URLS }}
         run: python main.py
 
       - name: 上传截图
