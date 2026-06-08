@@ -1,9 +1,9 @@
-name: Host2Play 续期（Xray 代理版）
+name: Host2Play 续期
 
 on:
   schedule:
-    - cron: '0 0,11,22 * * *'    # UTC 00:00, 11:00, 22:00
-    - cron: '30 5,16 * * *'      # UTC 05:30, 16:30
+    - cron: '0 0,11,22 * * *'    # 触发点: 00:00, 11:00, 22:00
+    - cron: '30 5,16 * * *'      # 触发点: 05:30, 16:30
   workflow_dispatch:
 
 permissions:
@@ -12,8 +12,9 @@ permissions:
 
 jobs:
   run-renew:
-    name: 执行续期
+    name: 执行脚本
     runs-on: ubuntu-latest
+
     steps:
       - name: 拉取仓库
         uses: actions/checkout@v4
@@ -35,101 +36,38 @@ jobs:
           python -m pip install --upgrade pip
           pip install DrissionPage xvfbwrapper requests SpeechRecognition pydub
 
+      # ==========================================
+      # 关键变更：用 Xray 替代 WARP
+      # 不再使用 fscarmen/warp-on-actions
+      # 改为下载 Xray 并使用 V2RAY_CONFIG 代理
+      # ==========================================
       - name: 下载并启动 Xray 代理
         env:
           V2RAY_CONFIG: ${{ secrets.V2RAY_CONFIG }}
         run: |
-          # Download Xray-core
+          # 下载 Xray
           curl -sL https://github.com/XTLS/Xray-core/releases/latest/download/Xray-linux-64.zip -o xray.zip
-          mkdir -p xray-bin && unzip -qo xray.zip -d xray-bin && chmod +x xray-bin/xray
-
-          # Grant network capabilities to Xray binary (fixes "operation not permitted")
-          # This allows Xray to bind privileged ports and use raw sockets for sniffing
-          sudo setcap cap_net_bind_service,cap_net_raw+ep ./xray-bin/xray 2>/dev/null || true
-
-          # Write V2Ray config from secrets
+          unzip -q xray.zip && chmod +x xray
+          
+          # 写入配置文件
           echo "$V2RAY_CONFIG" > config.json
-
-          # Verify Xray binary works
-          ./xray-bin/xray version
-
-          # Auto-fix: patch config to use non-privileged inbound port if needed
-          # If the SOCKS inbound uses a port < 1024, replace it with 10808
-          python3 -c "
-          import json, sys
-          try:
-              with open('config.json','r') as f: cfg=json.load(f)
-              for ib in cfg.get('inbounds',[]):
-                  if ib.get('protocol')=='socks' and ib.get('port',10808) < 1024:
-                      ib['port']=10808
-                      print(f'[FIX] SOCKS inbound port changed to 10808')
-              # Ensure sniffing doesn't require raw sockets if capabilities missing
-              for ib in cfg.get('inbounds',[]):
-                  sn = ib.get('sniffing',{})
-                  if sn.get('enabled'):
-                      # RouteOnly sniffing avoids raw socket requirement
-                      sn['routeOnly'] = True
-              with open('config.json','w') as f: json.dump(cfg,f,indent=2)
-          except Exception as e:
-              print(f'[WARN] Config patch failed: {e}')
-          "
-
-          # Start Xray in background and validate config by checking startup
-          ./xray-bin/xray run -c config.json &
-          XRAY_PID=$!
+          
+          # 启动 Xray
+          ./xray run -c config.json &
           sleep 5
-
-          # Check if Xray is still running (crashed = bad config)
-          if ! kill -0 $XRAY_PID 2>/dev/null; then
-            echo "⚠️ Xray 启动失败，尝试无嗅探模式..."
-            # Retry without sniffing (sniffing may cause "operation not permitted")
-            python3 -c "
-            import json
-            try:
-                with open('config.json','r') as f: cfg=json.load(f)
-                for ib in cfg.get('inbounds',[]):
-                    ib.pop('sniffing', None)
-                with open('config.json','w') as f: json.dump(cfg,f,indent=2)
-                print('[FIX] Removed sniffing from inbounds')
-            except: pass
-            "
-            ./xray-bin/xray run -c config.json &
-            XRAY_PID=$!
-            sleep 5
-            if ! kill -0 $XRAY_PID 2>/dev/null; then
-              echo "❌ Xray 启动失败，请检查 V2RAY_CONFIG 配置是否正确"
-              echo "常见原因："
-              echo "  1. inbound 端口 < 1024（需要 root 权限）"
-              echo "  2. 配置 JSON 格式有误"
-              echo "  3. 代理服务器地址不可达"
-              echo "请确认 inbounds 中 SOCKS 端口 > 1024（建议 10808）"
-              exit 1
-            fi
-          fi
-          echo "✅ Xray 代理启动成功 (PID: $XRAY_PID)"
-
-          # Verify proxy is working
+          
+          # 验证代理是否正常
           echo "直连 IP：$(curl -s --max-time 5 ifconfig.me || echo '失败')"
           echo "代理 IP：$(curl -s --max-time 10 --socks5 127.0.0.1:10808 ifconfig.me || echo '代理失败，请检查 V2RAY_CONFIG')"
 
-          if ! curl -s --max-time 10 --socks5 127.0.0.1:10808 https://www.google.com > /dev/null 2>&1; then
-            echo "⚠️ Xray 代理连接 Google 失败，但继续执行脚本"
-          fi
+      # 注意：不再需要"修复 DNS"步骤
+      # Xray 代理在应用层工作，不需要修改系统 DNS
 
       - name: 执行续订
         env:
           TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
           TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
-          PROXY_PORT: "10808"
-          MAX_CAPTCHA: "5"
-          MAX_RENEW_RETRIES: "3"
         run: python main.py
-
-      - name: 停止 Xray 代理
-        if: always()
-        run: |
-          pkill -f "xray-bin/xray" || true
-          echo "Xray 代理已停止"
 
       - name: 上传截图
         if: always()
@@ -149,26 +87,3 @@ jobs:
           delete_workflow_pattern: ${{ github.workflow }}
           retain_days: 0
           keep_minimum_runs: 2
-
-# ========================================
-# 部署说明：
-# 1. Fork 本仓库
-# 2. 在 Settings → Secrets → Actions 中添加：
-#    - V2RAY_CONFIG: Xray 代理配置 JSON（完整字符串）
-#      ⚠️ 注意：V2RAY_CONFIG 必须是完整的 JSON，包含 inbounds 和 outbounds
-#      ⚠️ 确保 inbounds 中有 SOCKS 协议监听，端口 > 1024（建议 10808）
-#      ⚠️ 端口 < 1024 需要 root 权限，GitHub Actions 会报 "operation not permitted"
-#      ⚠️ 如果配置中有 sniffing，脚本会自动设置 routeOnly=true 避免权限问题
-#    - TG_BOT_TOKEN: Telegram Bot Token（可选）
-#    - TG_CHAT_ID: Telegram Chat ID（可选）
-# 3. 修改 main.py 中的 RENEW_URLS 为你的服务器续期链接
-# 4. 启用 Actions
-# 5. 手动触发一次测试运行，确认 Xray 代理启动成功
-#
-# 常见错误排查：
-# - "operation not permitted": inbound 端口 < 1024 或 sniffing 需要原始套接字
-#   → 确保 SOCKS inbound 端口 > 1024（如 10808）
-#   → 脚本会自动尝试 setcap 和移除 sniffing 重试
-# - "xray test: unknown command": Xray-core 没有 test 子命令
-#   → 已改用启动检测方式验证配置
-# ========================================
