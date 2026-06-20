@@ -3,8 +3,8 @@ name: Host2Play 续期
 on:
   schedule:
     - cron: '0 */4 * * *'
-    #- cron: '0 0,11,22 * * *'    # 触发点: 00:00, 11:00, 22:00
-    #- cron: '30 5,16 * * *'      # 触发点: 05:30, 16:30
+    #- cron: '0 0,11,22 * * *' # 触发点: 00:00, 11:00, 22:00
+    #- cron: '30 5,16 * * *' # 触发点: 05:30, 16:30
   workflow_dispatch:
 
 permissions:
@@ -48,26 +48,33 @@ jobs:
           echo "[INFO] 停用 systemd-resolved，设置公共 DNS..."
           sudo systemctl stop systemd-resolved 2>/dev/null || true
           sudo systemctl disable systemd-resolved 2>/dev/null || true
-
+          
           sudo rm -f /etc/resolv.conf
           echo -e "nameserver 1.1.1.1\nnameserver 8.8.8.8\nnameserver 1.0.0.1" | sudo tee /etc/resolv.conf
-
+          
           sleep 2
-
+          
           echo "[INFO] DNS 测试:"
           nslookup host2play.gratis 1.1.1.1 || echo "[WARN] 解析失败"
-
+          
           echo ""
           echo "[INFO] 当前出口 IP:"
           curl -s --max-time 10 https://api.ipify.org && echo
           echo "[INFO] WARP Trace:"
           curl -s --max-time 10 https://www.cloudflare.com/cdn-cgi/trace | grep -E 'ip=|warp=|loc=' || true
 
+      # --- 修改开始：引入自动重试 Action ---
       - name: 执行续订
+        uses: nick-fields/retry@v3
+        with:
+          timeout_minutes: 15    # 单次运行的超时时间（分钟），可根据实际情况调整
+          max_attempts: 3        # 最大尝试次数（包含首次运行，即失败后最多重试 2 次）
+          retry_wait_seconds: 10 # 每次重试前等待的秒数
+          command: python main.py
         env:
           TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
           TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
-        run: python main.py
+      # --- 修改结束 ---
 
       # --- 新增的防暂停代码开始 ---
       - name: Commit time.txt to repo
